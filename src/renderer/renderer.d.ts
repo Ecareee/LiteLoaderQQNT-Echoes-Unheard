@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { IPCExports } from '../preload';
+import type {IPCExports} from '../preload';
 
 type $LiteLoaderAPI = {
   openPath: (path: string) => Promise<void>,
@@ -26,5 +26,5 @@ declare interface $LiteLoader extends LiteLoader {
 
 declare global {
   const LiteLoader: $LiteLoader;
-  const LLTemplate_Vite: typeof IPCExports;
+  const Echoes_Unheard: typeof IPCExports;
 }

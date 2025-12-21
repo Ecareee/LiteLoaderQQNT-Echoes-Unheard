@@ -1,13 +1,13 @@
 {
-  "name": "lltemplate-vite",
-  "version": "2.0.0",
-  "description": "A plugin template for LiteLoaderQQNT, powered by Vite & TypeScript",
+  "name": "echoes-unheard",
+  "version": "0.1.0",
+  "description": "为那些无声的连接呼唤发声",
   "main": "index.js",
   "scripts": {
     "lint": "eslint --fix src/**/* --ext .js,.ts",
     "build": "electron-vite build"
   },
-  "author": "MisaLiu",
+  "author": "Ecaree",
   "license": "GPL-3.0-only",
   "devDependencies": {
     "@electron-toolkit/eslint-config-ts": "^3.0.0",
