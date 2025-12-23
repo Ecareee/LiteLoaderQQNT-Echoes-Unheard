@@ -8,38 +8,6 @@ ipcRenderer.on('Echoes-Unheard.debugChanged', (_e, payload: { uin: string; debug
   }
 });
 
-function safeToString(v: unknown) {
-  if (v instanceof Error) return `${v.name}: ${v.message}\n${v.stack ?? ''}`;
-  try {
-    return typeof v === 'string' ? v : JSON.stringify(v, (_k, val) => {
-      if (val instanceof Map) return { __type: 'Map', entries: Array.from(val.entries()) };
-      return val;
-    });
-  } catch {
-    return String(v);
-  }
-}
-
-(function hookConsoleForward() {
-  const levels = ['log', 'info', 'warn', 'error', 'debug'] as const;
-  for (const level of levels) {
-    const raw = console[level]?.bind(console);
-    if (!raw) continue;
-
-    console[level] = (...args: unknown[]) => {
-      raw(...args);
-      try {
-        ipcRenderer.send('Echoes-Unheard.forwardLog', {
-          source: 'preload',
-          level,
-          args: args.map(safeToString),
-          ts: Date.now()
-        });
-      } catch {}
-    };
-  }
-})();
-
 const webContentsId = Number(new URLSearchParams(location.search).get('webcontentsid'));
 
 // 新版 RM_IPC 通道名
