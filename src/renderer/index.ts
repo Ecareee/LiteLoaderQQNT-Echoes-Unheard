@@ -1,169 +1,62 @@
 import {logger, setLoggerDebug} from '../util/logger';
 import type {PluginConfig} from '../util/config';
 
-const uidCache = new Map<string, string>();
-let CONFIG: PluginConfig = {debug: false, rules: []};
+let CONFIG: PluginConfig = {enabled: true, debug: false, rules: []};
+let uin: string | null = null;
+
 let offRecvMsg: null | (() => void) = null;
 let offCfgChanged: null | (() => void) = null;
+let offDebugChanged: null | (() => void) = null;
 
 void init();
 
+function reconcileSubscription() {
+  if (CONFIG.enabled) {
+    if (!offRecvMsg) {
+      offRecvMsg = Echoes_Unheard.subscribeEvent(
+        'nodeIKernelMsgListener/onRecvMsg',
+        handleIncomingPayload
+      );
+      logger.info('已订阅 onRecvMsg');
+    }
+  } else {
+    if (offRecvMsg) {
+      offRecvMsg();
+      offRecvMsg = null;
+      logger.info('已退订 onRecvMsg');
+    }
+  }
+}
+
 function applyConfig(cfg: PluginConfig) {
   CONFIG = cfg;
-  setLoggerDebug(CONFIG.debug);
   logger.info('config applied:', CONFIG);
-}
-
-
-function readMapLike(mapLike: any, key: string): any {
-  if (!mapLike) return undefined;
-  if (typeof mapLike.get === 'function') return mapLike.get(key);
-  if (Array.isArray(mapLike)) {
-    for (const [k, v] of mapLike) if (String(k) === String(key)) return v;
-  }
-  return mapLike[key];
-}
-
-async function getCurrentUin(): Promise<string | null> {
-  const uid = await Echoes_Unheard.getUid();
-  return uid ? await getUinByUid(uid) : null;
-}
-
-
-async function getUidByUin(uin: string): Promise<string | null> {
-  if (uidCache.has(uin)) return uidCache.get(uin)!;
-
-  // 方案 A：nodeIKernelUixConvertService
-  try {
-    // const res = await Echoes_Unheard.invokeNative(
-    //   "ntApi",
-    //   "nodeIKernelUixConvertService/getUid",
-    //   false,
-    //   [uin]
-    // );
-    const res = await Echoes_Unheard.invokeNative(
-      'ntApi',
-      'nodeIKernelUixConvertService/getUid',
-      false,
-      {uins: [uin]} // 必须是 object
-    );
-
-    logger.info('getUidByUin nodeIKernelUixConvertService result =', res);
-    const uid = readMapLike(res?.uidInfo, uin);
-
-    if (uid) {
-      uidCache.set(uin, String(uid));
-      return String(uid);
-    }
-  } catch (e) {
-    logger.warn('getUidByUin nodeIKernelUixConvertService error =', e);
-  }
-
-  // 方案 B：nodeIKernelProfileService
-  try {
-    // const res2 = await Echoes_Unheard.invokeNative(
-    //   'ntApi',
-    //   'nodeIKernelProfileService/getUidByUin',
-    //   false,
-    //   'FriendsServiceImpl',
-    //   [uin]
-    // );
-    const res2 = await Echoes_Unheard.invokeNative(
-      'ntApi',
-      'nodeIKernelProfileService/getUidByUin',
-      false,
-      {callFrom: 'FriendsServiceImpl', uin: [uin]} // 必须是 object
-    );
-
-    logger.info('getUidByUin nodeIKernelProfileService result =', res2);
-    const uid2 = readMapLike(res2, uin);
-
-    if (uid2) {
-      uidCache.set(uin, String(uid2));
-      return String(uid2);
-    }
-  } catch (e) {
-    logger.warn('getUidByUin nodeIKernelProfileService error =', e);
-  }
-
-  return null;
-}
-
-async function getUinByUid(uid: string): Promise<string | null> {
-  try {
-    const res = await Echoes_Unheard.invokeNative(
-      'ntApi',
-      'nodeIKernelUixConvertService/getUin',
-      false,
-      {uids: [uid]} // 必须是 object
-    );
-
-    logger.info('getUinByUid result =', res);
-    const uin = readMapLike(res?.uinInfo, uid);
-    return uin ? String(uin) : null;
-  } catch (e) {
-    logger.warn('getUinByUid error =', e);
-    return null;
-  }
-}
-
-function makePlainTextElement(text: string) {
-  return {
-    elementId: '',
-    elementType: 1,
-    textElement: {content: text}
-  };
-}
-
-async function sendMessage(friendUin: string, text: string) {
-  const uid = await getUidByUin(friendUin);
-  logger.info(`发送信息：uid=${uid}`);
-  if (!uid) {
-    logger.warn('找不到该好友的 uid');
-    return;
-  }
-
-  const payload = {
-    msgId: '0',
-    peer: {chatType: 1, peerUid: uid, guildId: ''},
-    msgElements: [makePlainTextElement(text)],
-    msgAttributeInfos: new Map()
-  };
-
-  const res = await Echoes_Unheard.invokeNative(
-    'ntApi',
-    'nodeIKernelMsgService/sendMsg',
-    false,
-    payload
-  );
-
-  logger.info('sendMessage result =', res);
-  return res;
+  reconcileSubscription();
 }
 
 function matchRulesAndHandle(msg: any) {
   const chatType = msg?.chatType;
   if (chatType !== 2) return; // 只处理群消息
 
-  const groupCode = msg?.peerUid;
-  if (!groupCode) return;
-
-  const senderUin = msg?.senderUin;
-  if (!senderUin) return;
+  const groupCode = String(msg?.peerUid ?? '');
+  const senderUin = String(msg?.senderUin ?? '');
+  if (!groupCode || !senderUin) return;
 
   for (const r of CONFIG.rules) {
     if (!r.enabled) continue;
-    if (!r.groupCode || !r.recvFriendUin || !r.watchFriendUin) continue;
+    if (!r.groupCode || !r.triggerFriendUin || !r.targetFriendUin) continue;
     if (r.groupCode !== groupCode) continue;
-    if (r.watchFriendUin !== senderUin) continue;
+    if (r.triggerFriendUin !== senderUin) continue;
 
     logger.info('命中规则：', {groupCode, senderUin, rule: r});
 
-    void sendMessage(r.recvFriendUin, r.replyText);
+    void Echoes_Unheard.sendMessage(r.targetFriendUin, r.replyText);
   }
 }
 
 function handleIncomingPayload(payload: any) {
+  if (!CONFIG.enabled) return;
+
   logger.info('收到消息：', payload);
 
   const msg = payload?.msgList?.[0];
@@ -173,10 +66,18 @@ function handleIncomingPayload(payload: any) {
 }
 
 async function init() {
-  const uin = await getCurrentUin();
+  uin = await Echoes_Unheard.getCurrentUin();
   if (!uin) {
     logger.error('无法获取当前登录账号 uin');
     return;
+  }
+
+  if (!offDebugChanged) {
+    offDebugChanged = Echoes_Unheard.onDebugChanged(({ uin: changedUin, debug }) => {
+      if (String(changedUin) !== String(uin)) return;
+      setLoggerDebug(debug);
+      logger.info('debug 同步:', debug);
+    });
   }
 
   const cfg = (await Echoes_Unheard.getConfig(uin)) as PluginConfig;
@@ -184,10 +85,6 @@ async function init() {
 
   logger.info('当前账号：', uin);
   logger.info('加载配置：', CONFIG);
-
-  if (!offRecvMsg) {
-    offRecvMsg = Echoes_Unheard.subscribeEvent('nodeIKernelMsgListener/onRecvMsg', handleIncomingPayload);
-  }
 
   if (!offCfgChanged) {
     offCfgChanged = Echoes_Unheard.onConfigChanged(({uin: changedUin, config}) => {
@@ -198,9 +95,12 @@ async function init() {
 }
 
 export const onSettingWindowCreated = async (view: HTMLElement) => {
-  const uin = await getCurrentUin();
+  const uin = await Echoes_Unheard.getCurrentUin();
+
+  const configTip = uin ? `当前配置文件：${uin}.json` : '无法获取当前账号';
+
   if (!uin) {
-    view.innerHTML = '<setting-text>无法获取当前账号</setting-text>';
+    view.innerHTML = `<setting-text>${configTip}</setting-text>`;
     return;
   }
 
@@ -236,11 +136,22 @@ export const onSettingWindowCreated = async (view: HTMLElement) => {
       <setting-panel>
         <setting-list data-direction="column">
           <setting-item data-direction="column">
-            <div id="rules-container"></div>
+            <setting-text>${configTip}</setting-text>
           </setting-item>
 
-          <setting-item>
-            <div style="display:flex; justify-content:flex-start;">
+          <setting-item data-direction="row">
+            <div>
+              <setting-text>全局启用</setting-text>
+              <setting-text data-type="secondary">关闭后将停止监听消息</setting-text>
+            </div>
+            <setting-switch id="enabled-switch"></setting-switch>
+          </setting-item>
+          
+          <!--setting-item 组件并不是真正的自由 flex 容器-->
+          <setting-item data-direction="column">
+            <div style="display:flex; justify-content:flex-start; flex-direction:column; width:100%; gap:12px;">
+              <setting-text style="display:block;">规则</setting-text>
+              <div id="rules-container" style="width:100%;"></div>
               <setting-button id="add-rule-btn" data-type="primary">+ 添加规则</setting-button>
             </div>
           </setting-item>
@@ -259,6 +170,7 @@ export const onSettingWindowCreated = async (view: HTMLElement) => {
     </setting-section>
   `;
 
+  const enabledSwitch = view.querySelector('#enabled-switch') as HTMLElement;
   const rulesContainer = view.querySelector('#rules-container') as HTMLDivElement;
   const addRuleBtn = view.querySelector('#add-rule-btn') as HTMLElement;
   const debugSwitch = view.querySelector('#debug-switch') as HTMLElement;
@@ -270,7 +182,6 @@ export const onSettingWindowCreated = async (view: HTMLElement) => {
   };
 
   let saveTimer: number | null = null;
-
   const scheduleSave = () => {
     if (saveTimer) window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => {
@@ -280,38 +191,53 @@ export const onSettingWindowCreated = async (view: HTMLElement) => {
     }, 300);
   };
 
-  const setSwitchActive = (active: boolean) => {
-    if (active) debugSwitch.setAttribute('is-active', '');
-    else debugSwitch.removeAttribute('is-active');
+  const setSwitchActive = (el: HTMLElement, active: boolean) => {
+    if (active) el.setAttribute('is-active', '');
+    else el.removeAttribute('is-active');
   };
+  const getSwitchActive = (el: HTMLElement) => el.hasAttribute('is-active');
 
-  const getSwitchActive = () => debugSwitch.hasAttribute('is-active');
+  // 启用开关为 40px，四个元素平均分配宽度，删除按钮为 60px
+  const cols = '40px repeat(4, minmax(0, 1fr)) 60px';
+
+  function makeGridRow(className: string) {
+    const row = document.createElement('div');
+    row.className = `rule-grid ${className}`;
+    row.style.cssText = `
+      display:grid;
+      grid-template-columns: ${cols};
+      gap:8px;
+      width:100%;
+      align-items:center;
+    `;
+    return row;
+  }
+
+  function makeInput(value: string, onInput: (v: string) => void) {
+    const input = document.createElement('input');
+    input.className = 'q-input';
+    input.value = value ?? '';
+    input.addEventListener('input', (e) => {
+      onInput((e.target as HTMLInputElement).value);
+      scheduleSave();
+    });
+    return input;
+  }
 
   const renderRules = () => {
     rulesContainer.innerHTML = '';
 
     if (!uiConfig.rules.length) {
       rulesContainer.innerHTML = `
-      <setting-text data-type="secondary" style="opacity:.7;">
-        暂无规则，点击下方 “+ 添加规则”
-      </setting-text>
-    `;
+        <setting-text data-type="secondary" style="opacity:.7;">
+          暂无规则，点击下方 “+ 添加规则”
+        </setting-text>
+      `;
       return;
     }
 
-    // 启用开关为 40px，四个元素平均分配宽度，删除按钮为 60px
-    const cols = '40px repeat(4, minmax(0, 1fr)) 60px';
-
-    const header = document.createElement('div');
-    header.className = 'rule-grid rule-header';
-    header.style.cssText = `
-      display:grid;
-      grid-template-columns: ${cols};
-      gap:8px;
-      font-size:12px;
-      width:100%;
-      align-items:center;
-    `;
+    const header = makeGridRow('rule-header');
+    header.style.fontSize = '12px';
     header.innerHTML = `
       <div>启用</div>
       <div>群号</div>
@@ -323,74 +249,57 @@ export const onSettingWindowCreated = async (view: HTMLElement) => {
     rulesContainer.appendChild(header);
 
     uiConfig.rules.forEach((r, i) => {
-      const row = document.createElement('div');
-      row.className = 'rule-grid rule-row';
-      row.style.cssText = `
-        display:grid;
-        grid-template-columns: ${cols};
-        gap:8px;
-        width:100%;
-        align-items:center;
-      `;
-      row.innerHTML = `
-        <setting-switch class="enable-switch" ${r.enabled ? 'is-active' : ''}></setting-switch>
-        <input class="q-input" value="${r.groupCode}">
-        <input class="q-input" value="${r.watchFriendUin}">
-        <input class="q-input" value="${r.recvFriendUin}">
-        <input class="q-input" value="${r.replyText}">
-        <setting-button class="del-btn" data-type="secondary">删除</setting-button>
-      `;
+      const row = makeGridRow('rule-row');
 
-      const inputs = row.querySelectorAll('input');
-      inputs[0].oninput = e => {
-        uiConfig.rules[i].groupCode = (e.target as HTMLInputElement).value;
-        scheduleSave();
-      };
-      inputs[1].oninput = e => {
-        uiConfig.rules[i].watchFriendUin = (e.target as HTMLInputElement).value;
-        scheduleSave();
-      };
-      inputs[2].oninput = e => {
-        uiConfig.rules[i].recvFriendUin = (e.target as HTMLInputElement).value;
-        scheduleSave();
-      };
-      inputs[3].oninput = e => {
-        uiConfig.rules[i].replyText = (e.target as HTMLInputElement).value;
-        scheduleSave();
-      };
-
-      const delBtn = row.querySelector('.del-btn') as HTMLElement;
-      delBtn.addEventListener('click', () => {
-        uiConfig.rules.splice(i, 1);
-        renderRules();
-        saveConfig();
-      });
-
-      const enableSwitch = row.querySelector('.enable-switch') as HTMLElement;
-
-      const setEnableSwitchActive = (active: boolean) => {
-        if (active) enableSwitch.setAttribute('is-active', '');
-        else enableSwitch.removeAttribute('is-active');
-      };
-      const getEnableSwitchActive = () => enableSwitch.hasAttribute('is-active');
-
+      const enableSwitch = document.createElement('setting-switch');
+      enableSwitch.className = 'enable-switch';
+      setSwitchActive(enableSwitch, r.enabled);
       enableSwitch.addEventListener('click', () => {
-        const next = !getEnableSwitchActive();
-        setEnableSwitchActive(next);
+        const next = !getSwitchActive(enableSwitch);
+        setSwitchActive(enableSwitch, next);
         uiConfig.rules[i].enabled = next;
         scheduleSave();
       });
+
+      const groupInput = makeInput(r.groupCode, (v) => (uiConfig.rules[i].groupCode = v));
+      const triggerInput = makeInput(r.triggerFriendUin, (v) => (uiConfig.rules[i].triggerFriendUin = v));
+      const targetInput = makeInput(r.targetFriendUin, (v) => (uiConfig.rules[i].targetFriendUin = v));
+      const replyInput = makeInput(r.replyText, (v) => (uiConfig.rules[i].replyText = v));
+
+      const delBtn = document.createElement('setting-button');
+      delBtn.className = 'del-btn';
+      delBtn.setAttribute('data-type', 'secondary');
+      delBtn.textContent = '删除';
+      delBtn.addEventListener('click', () => {
+        uiConfig.rules.splice(i, 1);
+        renderRules();
+        void saveConfig();
+      });
+
+      row.appendChild(enableSwitch);
+      row.appendChild(groupInput);
+      row.appendChild(triggerInput);
+      row.appendChild(targetInput);
+      row.appendChild(replyInput);
+      row.appendChild(delBtn);
 
       rulesContainer.appendChild(row);
     });
   };
 
+  enabledSwitch.addEventListener('click', async () => {
+    const next = !getSwitchActive(enabledSwitch);
+    setSwitchActive(enabledSwitch, next);
+    uiConfig.enabled = next;
+    await saveConfig();
+  });
+
   addRuleBtn.addEventListener('click', async () => {
     uiConfig.rules.push({
       enabled: true,
       groupCode: '',
-      watchFriendUin: '',
-      recvFriendUin: '',
+      triggerFriendUin: '',
+      targetFriendUin: '',
       replyText: ''
     });
     renderRules();
@@ -398,16 +307,15 @@ export const onSettingWindowCreated = async (view: HTMLElement) => {
   });
 
   debugSwitch.addEventListener('click', async () => {
-    const next = !getSwitchActive();
-    setSwitchActive(next);
+    const next = !getSwitchActive(debugSwitch);
+    setSwitchActive(debugSwitch, next);
     uiConfig.debug = next;
     await saveConfig();
   });
 
   // 初始化
-  await (async () => {
-    uiConfig = await Echoes_Unheard.getConfig(uin);
-    setSwitchActive(uiConfig.debug);
-    renderRules();
-  })();
+  uiConfig = (await Echoes_Unheard.getConfig(uin)) as PluginConfig;
+  setSwitchActive(enabledSwitch, uiConfig.enabled);
+  setSwitchActive(debugSwitch, uiConfig.debug);
+  renderRules();
 };

@@ -11,9 +11,6 @@ export const logger = {
     if (!DEBUG) return;
     console.log(PREFIX, ...args);
   },
-  warn: (...args: any[]) => {
-    if (!DEBUG) return;
-    console.warn(PREFIX, ...args);
-  },
+  warn: (...args: any[]) => console.warn(PREFIX, ...args),
   error: (...args: any) => console.error(PREFIX, ...args)
 };

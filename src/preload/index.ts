@@ -1,5 +1,44 @@
 import {contextBridge, ipcRenderer} from 'electron';
-import {logger} from '../util/logger';
+import {logger, setLoggerDebug} from '../util/logger';
+
+let UIN: string | null = null;
+ipcRenderer.on('Echoes-Unheard.debugChanged', (_e, payload: { uin: string; debug: boolean }) => {
+  if (!UIN || String(payload.uin) === String(UIN)) {
+    setLoggerDebug(payload.debug);
+  }
+});
+
+function safeToString(v: unknown) {
+  if (v instanceof Error) return `${v.name}: ${v.message}\n${v.stack ?? ''}`;
+  try {
+    return typeof v === 'string' ? v : JSON.stringify(v, (_k, val) => {
+      if (val instanceof Map) return { __type: 'Map', entries: Array.from(val.entries()) };
+      return val;
+    });
+  } catch {
+    return String(v);
+  }
+}
+
+(function hookConsoleForward() {
+  const levels = ['log', 'info', 'warn', 'error', 'debug'] as const;
+  for (const level of levels) {
+    const raw = console[level]?.bind(console);
+    if (!raw) continue;
+
+    console[level] = (...args: unknown[]) => {
+      raw(...args);
+      try {
+        ipcRenderer.send('Echoes-Unheard.forwardLog', {
+          source: 'preload',
+          level,
+          args: args.map(safeToString),
+          ts: Date.now()
+        });
+      } catch {}
+    };
+  }
+})();
 
 const webContentsId = Number(new URLSearchParams(location.search).get('webcontentsid'));
 
@@ -114,7 +153,165 @@ function subscribeEvent(eventName: string, handler: (payload: any) => void) {
   return () => ipcRenderer.off(down, onDown);
 }
 
+const uinToUidCache = new Map<string, string>();
+const uidToUinCache = new Map<string, string>();
+
+function readMapLike(mapLike: any, key: string): any {
+  if (!mapLike) return undefined;
+  if (typeof mapLike.get === 'function') return mapLike.get(key);
+  if (Array.isArray(mapLike)) {
+    for (const [k, v] of mapLike) if (String(k) === String(key)) return v;
+  }
+  return mapLike[key];
+}
+
+async function getUidByUin(uin: string): Promise<string | null> {
+  const key = String(uin);
+  if (!key) return null;
+  if (uinToUidCache.has(uin)) return uinToUidCache.get(uin)!;
+
+  // 方案 A：nodeIKernelUixConvertService/getUid
+  try {
+    // const res = await invokeNative(
+    //   "ntApi",
+    //   "nodeIKernelUixConvertService/getUid",
+    //   false,
+    //   [key]
+    // );
+    const res = await invokeNative(
+      'ntApi',
+      'nodeIKernelUixConvertService/getUid',
+      false,
+      {uins: [key]} // 必须是对象
+    );
+
+    logger.info('getUidByUin nodeIKernelUixConvertService/getUid result =', res);
+    const uid = readMapLike(res?.uidInfo, key);
+
+    if (uid) {
+      uinToUidCache.set(key, String(uid));
+      uidToUinCache.set(String(uid), key);
+      return String(uid);
+    }
+  } catch (e) {
+    logger.warn('getUidByUin nodeIKernelUixConvertService/getUid error =', e);
+  }
+
+  // 方案 B：nodeIKernelProfileService/getUidByUin
+  try {
+    // const res2 = await invokeNative(
+    //   'ntApi',
+    //   'nodeIKernelProfileService/getUidByUin',
+    //   false,
+    //   'FriendsServiceImpl',
+    //   [key]
+    // );
+    const res2 = await invokeNative(
+      'ntApi',
+      'nodeIKernelProfileService/getUidByUin',
+      false,
+      {callFrom: 'FriendsServiceImpl', uin: [key]} // 必须是对象
+    );
+
+    logger.info('getUidByUin nodeIKernelProfileService/getUidByUin result =', res2);
+    const uid2 = readMapLike(res2, key);
+
+    if (uid2) {
+      uinToUidCache.set(key, String(uid2));
+      uidToUinCache.set(String(uid2), key);
+      return String(uid2);
+    }
+  } catch (e) {
+    logger.warn('getUidByUin nodeIKernelProfileService/getUidByUin error =', e);
+  }
+
+  return null;
+}
+
+async function getUinByUid(uid: string): Promise<string | null> {
+  const key = String(uid);
+  if (!key) return null;
+  if (uidToUinCache.has(key)) return uidToUinCache.get(key)!;
+
+  try {
+    const res = await invokeNative(
+      'ntApi',
+      'nodeIKernelUixConvertService/getUin',
+      false,
+      {uids: [key]} // 必须是对象
+    );
+
+    logger.info('getUinByUid result =', res);
+    const uin = readMapLike(res?.uinInfo, key);
+    if (uin) {
+      uidToUinCache.set(key, String(uin));
+      uinToUidCache.set(String(uin), key);
+      return String(uin);
+    }
+  } catch (e) {
+    logger.warn('getUinByUid error =', e);
+    return null;
+  }
+
+  return null;
+}
+
+// 获取当前登录账号 uid
+async function getCurrentUid(): Promise<string | null> {
+  const uid = await ipcRenderer.invoke('Echoes-Unheard.getUid');
+  return uid ? String(uid) : null;
+}
+
+// 获取当前登录账号 uin（QQ 号），用于配置文件的名称
+async function getCurrentUin(): Promise<string | null> {
+  const uid = await getCurrentUid();
+  if (!uid) return null;
+  const uin = await getUinByUid(uid);
+  UIN = uin ? String(uin) : null;
+  return UIN;
+}
+
+function makePlainTextElement(text: string) {
+  return {
+    elementId: '',
+    elementType: 1,
+    textElement: {content: text}
+  };
+}
+
+async function sendMessage(friendUin: string, text: string) {
+  const uid = await getUidByUin(friendUin);
+  logger.info(`发送信息：uid=${uid}`);
+  if (!uid) {
+    logger.warn('找不到该好友的 uid');
+    return;
+  }
+
+  const payload = {
+    msgId: '0',
+    peer: {chatType: 1, peerUid: uid, guildId: ''},
+    msgElements: [makePlainTextElement(text)],
+    msgAttributeInfos: new Map()
+  };
+
+  const res = await invokeNative(
+    'ntApi',
+    'nodeIKernelMsgService/sendMsg',
+    false,
+    payload
+  );
+
+  logger.info('sendMessage result =', res);
+  return res;
+}
+
 const Exports = {
+  onDebugChanged(handler: (payload: { uin: string; debug: boolean }) => void) {
+    const ch = 'Echoes-Unheard.debugChanged';
+    const listener = (_e: any, payload: any) => handler(payload);
+    ipcRenderer.on(ch, listener);
+    return () => ipcRenderer.off(ch, listener);
+  },
   invokeNative,
   subscribeEvent,
   getConfig(uin: string) {
@@ -123,15 +320,17 @@ const Exports = {
   setConfig(uin: string, cfg: any) {
     return ipcRenderer.invoke('Echoes-Unheard.setConfig', uin, cfg);
   },
-  onConfigChanged(handler: (payload: { uin: string; config: any }) => void) {
+  onConfigChanged(handler: (payload: {uin: string; config: any}) => void) {
     const ch = 'Echoes-Unheard.configChanged';
     const listener = (_e: any, payload: any) => handler(payload);
     ipcRenderer.on(ch, listener);
     return () => ipcRenderer.off(ch, listener);
   },
-  getUid() {
-    return ipcRenderer.invoke('Echoes-Unheard.getUid');
-  }
+  getUidByUin,
+  getUinByUid,
+  getCurrentUid,
+  getCurrentUin,
+  sendMessage
 };
 contextBridge.exposeInMainWorld('Echoes_Unheard', Exports);
 export type IPCExports = typeof Exports;

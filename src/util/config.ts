@@ -5,17 +5,19 @@ import {logger} from './logger';
 export interface Rule {
   enabled: boolean;
   groupCode: string;
-  recvFriendUin: string;
-  watchFriendUin: string;
+  triggerFriendUin: string;
+  targetFriendUin: string;
   replyText: string;
 }
 
 export interface PluginConfig {
+  enabled: boolean;
   debug: boolean;
   rules: Rule[];
 }
 
 const DEFAULT_CONFIG: PluginConfig = {
+  enabled: true,
   debug: false,
   rules: []
 };
@@ -38,13 +40,14 @@ function safeParse<T>(text: string, fallback: T): T {
 
 function normalizeConfig(cfg: any): PluginConfig {
   return {
-    debug: !!cfg?.debug,
+    enabled: cfg?.enabled !== false, // 默认 true
+    debug: cfg?.debug,
     rules: Array.isArray(cfg?.rules)
       ? cfg.rules.map((r: any) => ({
         enabled: r?.enabled !== false, // 默认 true
         groupCode: String(r?.groupCode ?? '').trim(),
-        recvFriendUin: String(r?.recvFriendUin ?? '').trim(),
-        watchFriendUin: String(r?.watchFriendUin ?? '').trim(),
+        triggerFriendUin: String(r?.triggerFriendUin ?? '').trim(),
+        targetFriendUin: String(r?.targetFriendUin ?? '').trim(),
         replyText: String(r?.replyText ?? '')
       }))
       : []
