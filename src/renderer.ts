@@ -1,11 +1,9 @@
-import {logger, setLoggerDebug} from '../util/logger';
-import {PluginConfig, DEFAULT_CONFIG} from '../util/config';
-
-// 运行态配置
-let CONFIG: PluginConfig = DEFAULT_CONFIG;
+import {logger, setLoggerDebug} from './util/logger';
+import type {PluginConfig} from './config/config';
+import {getRuntimeConfig, setRuntimeConfig, setUin} from './config/runtime';
+import {checkStrike, handlePrivateReply, syncRepliesFromHistory} from './util/strike';
 
 let uin: string | null = null;
-const MAX_NO_REPLY = 3;
 
 let offRecvMsg: null | (() => void) = null;
 let offCfgChanged: null | (() => void) = null;
@@ -13,25 +11,103 @@ let offDebugChanged: null | (() => void) = null;
 
 void init();
 
-// 简单防抖，避免 UI 输入/状态变化触发高频 setConfig
-function debounce<T extends (...args: any[]) => void>(fn: T, wait = 300) {
-  let t: number | null = null;
+async function init() {
+  uin = await Echoes_Unheard.getCurrentUin();
+  if (!uin) {
+    logger.error('无法获取当前登录账号 uin');
+    return;
+  }
+
+  setUin(uin);
+
+  if (!offDebugChanged) {
+    offDebugChanged = Echoes_Unheard.onDebugChanged(({uin: changedUin, debug}) => {
+      if (String(changedUin) !== String(uin)) return;
+      setLoggerDebug(debug);
+      logger.info('debug 同步:', debug);
+    });
+  }
+
+  const cfg = (await Echoes_Unheard.getConfig(uin)) as PluginConfig;
+  applyConfig(cfg);
+
+  logger.info('当前账号：', uin);
+  logger.info('加载配置：', getRuntimeConfig());
+
+  if (!offCfgChanged) {
+    offCfgChanged = Echoes_Unheard.onConfigChanged(({uin: changedUin, config}) => {
+      if (String(changedUin) !== String(uin)) return;
+      applyConfig(config as PluginConfig);
+    });
+  }
+}
+
+// ui 专用
+function uiDebounce<T extends (...args: any[]) => void>(fn: T, wait = 300) {
+  let t: ReturnType<typeof setTimeout> | null = null;
   return (...args: Parameters<T>) => {
-    if (t) window.clearTimeout(t);
-    t = window.setTimeout(() => {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => {
       fn(...args);
       t = null;
     }, wait);
   };
 }
 
+function handleIncomingPayload(payload: any) {
+  const CONFIG = getRuntimeConfig();
+  if (!CONFIG.enabled) return;
+
+  logger.info('收到消息：', payload);
+
+  const msg = payload?.msgList?.[0];
+  if (!msg) return;
+
+  const chatType = msg?.chatType;
+
+  if (chatType === 1) {
+    handlePrivateReply(msg, CONFIG);
+    return;
+  }
+
+  if (chatType === 2) {
+    matchRulesAndHandle(msg);
+  }
+}
+
+function matchRulesAndHandle(msg: any) {
+  const CONFIG = getRuntimeConfig();
+
+  const chatType = msg?.chatType;
+  if (chatType !== 2) return; // 只处理群消息
+
+  const groupCode = String(msg?.peerUid ?? '');
+  const senderUin = String(msg?.senderUin ?? '');
+  if (!groupCode || !senderUin) return;
+
+  for (const r of CONFIG.rules) {
+    if (!r.enabled) continue;
+    if (!r.groupCode || !r.triggerFriendUin || !r.targetFriendUin) continue;
+    if (r.groupCode !== groupCode) continue;
+    if (r.triggerFriendUin !== senderUin) continue;
+
+    logger.info('命中规则：', {groupCode, senderUin, rule: r});
+
+    if (!checkStrike(r, CONFIG)) continue;
+
+    void Echoes_Unheard.sendMessage(r.targetFriendUin, r.replyText);
+  }
+}
+
 function setSwitchActive(el: HTMLElement, active: boolean) {
   if (active) el.setAttribute('is-active', '');
   else el.removeAttribute('is-active');
 }
+
 function getSwitchActive(el: HTMLElement) {
   return el.hasAttribute('is-active');
 }
+
 function bindSwitch(el: HTMLElement, getValue: () => boolean, setValue: (v: boolean) => void, afterToggle?: () => void) {
   setSwitchActive(el, getValue());
   el.addEventListener('click', () => {
@@ -42,52 +118,9 @@ function bindSwitch(el: HTMLElement, getValue: () => boolean, setValue: (v: bool
   });
 }
 
-function toMs(t: any): number {
-  const n = Number(t || 0);
-  if (!n) return 0;
-  return n < 1e12 ? n * 1000 : n;
-}
-
-// 运行态变更写回配置
-const persistConfigDebounced = debounce(async () => {
-  if (!uin) return;
-  try {
-    CONFIG = (await Echoes_Unheard.setConfig(uin, CONFIG)) as PluginConfig;
-  } catch (e) {
-    logger.error('persist config failed:', e);
-  }
-}, 200);
-
-function handlePrivateReply(msg: any) {
-  if (!CONFIG.strikeOutMode) return;
-
-  const senderUin = String(msg?.senderUin ?? '');
-  if (!senderUin) return;
-
-  const msgAt = toMs(msg?.msgTime) || Date.now();
-
-  let changed = false;
-  for (const r of CONFIG.rules) {
-    if (String(r.targetFriendUin) !== senderUin) continue;
-    if (!r.awaitingReply) continue;
-
-    const lastSentAt = Number(r.lastSentAt || 0);
-    // 只要对方发言时间在 lastSentAt 之后，就算回复
-    if (!lastSentAt || msgAt >= lastSentAt) {
-      r.awaitingReply = false;
-      r.noReplyStreak = 0;
-      r.lastReplyAt = msgAt;
-      changed = true;
-    }
-  }
-
-  if (changed) {
-    logger.info('对方已回复，清空 noReplyStreak:', senderUin);
-    persistConfigDebounced();
-  }
-}
-
 function reconcileSubscription() {
+  const CONFIG = getRuntimeConfig();
+
   if (CONFIG.enabled) {
     if (!offRecvMsg) {
       offRecvMsg = Echoes_Unheard.subscribeEvent(
@@ -106,161 +139,18 @@ function reconcileSubscription() {
 }
 
 function applyConfig(cfg: PluginConfig) {
-  const prevStrike = !!CONFIG.strikeOutMode;
-  CONFIG = cfg ?? DEFAULT_CONFIG;
+  const prevStrike = getRuntimeConfig().strikeOutMode;
+
+  setRuntimeConfig(cfg);
+  const CONFIG = getRuntimeConfig();
+
+  setLoggerDebug(CONFIG.debug);
   logger.info('config applied:', CONFIG);
+
   reconcileSubscription();
 
   if (!prevStrike && !!CONFIG.strikeOutMode) {
-    void syncRepliesFromHistory();
-  }
-}
-
-// 接收者连续 3 次没有回复，第 4 次命中时自动关闭规则启用并阻止发送
-function checkStrike(rule: any): boolean {
-  if (!CONFIG.strikeOutMode) return true;
-  if (!rule.enabled) return false;
-
-  const streak = Number(rule.noReplyStreak || 0);
-  if (rule.awaitingReply && streak >= MAX_NO_REPLY) {
-    rule.enabled = false;
-    logger.info('三振出局模式：规则自动关闭', rule);
-    persistConfigDebounced();
-    return false; // 不再发送
-  }
-
-  rule.noReplyStreak = rule.awaitingReply ? streak + 1 : 1;
-  rule.awaitingReply = true;
-  rule.lastSentAt = Date.now();
-  persistConfigDebounced();
-  return true;
-}
-
-function matchRulesAndHandle(msg: any) {
-  const chatType = msg?.chatType;
-  if (chatType !== 2) return; // 只处理群消息
-
-  const groupCode = String(msg?.peerUid ?? '');
-  const senderUin = String(msg?.senderUin ?? '');
-  if (!groupCode || !senderUin) return;
-
-  for (const r of CONFIG.rules) {
-    if (!r.enabled) continue;
-    if (!r.groupCode || !r.triggerFriendUin || !r.targetFriendUin) continue;
-    if (r.groupCode !== groupCode) continue;
-    if (r.triggerFriendUin !== senderUin) continue;
-
-    logger.info('命中规则：', {groupCode, senderUin, rule: r});
-
-    if (!checkStrike(r)) continue;
-
-    void Echoes_Unheard.sendMessage(r.targetFriendUin, r.replyText);
-  }
-}
-
-async function syncRepliesFromHistory() {
-  if (!CONFIG.strikeOutMode) return;
-  if (!uin) return;
-
-  // 只同步正在等回复的目标
-  const targets = Array.from(new Set(
-    CONFIG.rules
-      .filter(r => r.awaitingReply && r.targetFriendUin)
-      .map(r => String(r.targetFriendUin))
-  ));
-
-  if (!targets.length) return;
-
-  for (const targetUin of targets) {
-    try {
-      const uid = await Echoes_Unheard.getUidByUin(targetUin);
-
-      const peer = {chatType: 1, peerUid: uid};
-
-      const res = await Echoes_Unheard.invokeNative(
-        'ntApi',
-        'nodeIKernelMsgService/getAioFirstViewLatestMsgs',
-        false,
-        {peer, cnt: 100} // 必须是对象，仅拉取最近 100 条
-      );
-      logger.info('getAioFirstViewLatestMsgs result =', res);
-
-      const msgList = res?.msgList || [];
-      let newestIncomingAt = 0;
-
-      for (const m of msgList) {
-        if (String(m?.senderUin ?? '') !== targetUin) continue;
-        newestIncomingAt = Math.max(newestIncomingAt, toMs(m?.msgTime) || 0);
-      }
-
-      if (!newestIncomingAt) continue;
-
-      let changed = false;
-      for (const r of CONFIG.rules) {
-        if (String(r.targetFriendUin) !== targetUin) continue;
-        if (!r.awaitingReply) continue;
-
-        const lastSentAt = Number(r.lastSentAt || 0);
-        if (!lastSentAt || newestIncomingAt >= lastSentAt) {
-          r.awaitingReply = false;
-          r.noReplyStreak = 0;
-          r.lastReplyAt = newestIncomingAt;
-          changed = true;
-        }
-      }
-      if (changed) persistConfigDebounced();
-    } catch (e) {
-      logger.error('syncRepliesFromHistory error:', e);
-    }
-  }
-}
-
-function handleIncomingPayload(payload: any) {
-  if (!CONFIG.enabled) return;
-
-  logger.info('收到消息：', payload);
-
-  const msg = payload?.msgList?.[0];
-  if (!msg) return;
-
-  const chatType = msg?.chatType;
-
-  if (chatType === 1) {
-    handlePrivateReply(msg);
-    return;
-  }
-
-  if (chatType === 2) {
-    matchRulesAndHandle(msg);
-  }
-}
-
-async function init() {
-  uin = await Echoes_Unheard.getCurrentUin();
-  if (!uin) {
-    logger.error('无法获取当前登录账号 uin');
-    return;
-  }
-
-  if (!offDebugChanged) {
-    offDebugChanged = Echoes_Unheard.onDebugChanged(({uin: changedUin, debug}) => {
-      if (String(changedUin) !== String(uin)) return;
-      setLoggerDebug(debug);
-      logger.info('debug 同步:', debug);
-    });
-  }
-
-  const cfg = (await Echoes_Unheard.getConfig(uin)) as PluginConfig;
-  applyConfig(cfg);
-
-  logger.info('当前账号：', uin);
-  logger.info('加载配置：', CONFIG);
-
-  if (!offCfgChanged) {
-    offCfgChanged = Echoes_Unheard.onConfigChanged(({uin: changedUin, config}) => {
-      if (String(changedUin) !== String(uin)) return;
-      applyConfig(config as PluginConfig);
-    });
+    void syncRepliesFromHistory(CONFIG);
   }
 }
 
@@ -369,13 +259,13 @@ export const onSettingWindowCreated = async (view: HTMLElement) => {
         groupCode: r.groupCode,
         triggerFriendUin: r.triggerFriendUin,
         targetFriendUin: r.targetFriendUin,
-        replyText: r.replyText,
+        replyText: r.replyText
       };
     });
 
     uiConfig = (await Echoes_Unheard.setConfig(uin, latest)) as PluginConfig;
   };
-  const scheduleSave = debounce(() => {
+  const scheduleSave = uiDebounce(() => {
     void saveConfig();
     logger.info('scheduleSave 当前 config', uiConfig);
   }, 300);
@@ -492,7 +382,7 @@ export const onSettingWindowCreated = async (view: HTMLElement) => {
       awaitingReply: false,
       noReplyStreak: 0,
       lastSentAt: 0,
-      lastReplyAt: 0,
+      lastReplyAt: 0
     } as any);
 
     renderRules();

@@ -1,15 +1,8 @@
-import {contextBridge, ipcRenderer} from 'electron';
-import {logger, setLoggerDebug} from '../util/logger';
+import {logger} from './logger';
+import {ipcRenderer} from 'electron';
 
 let UIN: string | null = null;
-ipcRenderer.on('Echoes-Unheard.debugChanged', (_e, payload: { uin: string; debug: boolean }) => {
-  if (!UIN || String(payload.uin) === String(UIN)) {
-    setLoggerDebug(payload.debug);
-  }
-});
-
 const webContentsId = Number(new URLSearchParams(location.search).get('webcontentsid'));
-
 // 新版 RM_IPC 通道名
 const IPC_UP_CHANNEL = `RM_IPCTO_MAIN${webContentsId}`;       // 渲染 -> 主进程（发送请求）
 const IPC_DOWN_CHANNEL = `RM_IPCFROM_MAIN${webContentsId}`;   // 主进程 -> 渲染（接收响应）
@@ -27,7 +20,7 @@ const IPC_FROM_RENDERER = `RM_IPCFROM_RENDERER${webContentsId}`; //  invokeNativ
  * @param  { ...any } args 函数参数。
  * @returns { Promise<any> } 函数返回值。
  */
-function invokeNative(eventName: string, cmdName: string, registered: boolean, ...args: any[]): Promise<any> {
+export function invokeNative(eventName: string, cmdName: string, registered: boolean, ...args: any[]): Promise<any> {
   logger.info(`准备发送 IPC 消息:
     - UP Channel: ${IPC_UP_CHANNEL}
     - DOWN Channel: ${IPC_DOWN_CHANNEL}
@@ -102,7 +95,7 @@ function invokeNative(eventName: string, cmdName: string, registered: boolean, .
   });
 }
 
-function subscribeEvent(eventName: string, handler: (payload: any) => void) {
+export function subscribeEvent(eventName: string, handler: (payload: any) => void) {
   const down = IPC_DOWN_CHANNEL;
   logger.info(`subscribeEvent: eventName=${eventName}, DOWN=${down}`);
 
@@ -124,7 +117,7 @@ function subscribeEvent(eventName: string, handler: (payload: any) => void) {
 const uinToUidCache = new Map<string, string>();
 const uidToUinCache = new Map<string, string>();
 
-function readMapLike(mapLike: any, key: string): any {
+export function readMapLike(mapLike: any, key: string): any {
   if (!mapLike) return undefined;
   if (typeof mapLike.get === 'function') return mapLike.get(key);
   if (Array.isArray(mapLike)) {
@@ -133,7 +126,7 @@ function readMapLike(mapLike: any, key: string): any {
   return mapLike[key];
 }
 
-async function getUidByUin(uin: string): Promise<string | null> {
+export async function getUidByUin(uin: string): Promise<string | null> {
   const key = String(uin);
   if (!key) return null;
   if (uinToUidCache.has(uin)) return uinToUidCache.get(uin)!;
@@ -196,7 +189,7 @@ async function getUidByUin(uin: string): Promise<string | null> {
   return null;
 }
 
-async function getUinByUid(uid: string): Promise<string | null> {
+export async function getUinByUid(uid: string): Promise<string | null> {
   const key = String(uid);
   if (!key) return null;
   if (uidToUinCache.has(key)) return uidToUinCache.get(key)!;
@@ -225,13 +218,13 @@ async function getUinByUid(uid: string): Promise<string | null> {
 }
 
 // 获取当前登录账号 uid
-async function getCurrentUid(): Promise<string | null> {
+export async function getCurrentUid(): Promise<string | null> {
   const uid = await ipcRenderer.invoke('Echoes-Unheard.getUid');
   return uid ? String(uid) : null;
 }
 
 // 获取当前登录账号 uin（QQ 号），用于配置文件的名称
-async function getCurrentUin(): Promise<string | null> {
+export async function getCurrentUin(): Promise<string | null> {
   const uid = await getCurrentUid();
   if (!uid) return null;
   const uin = await getUinByUid(uid);
@@ -247,7 +240,7 @@ function makePlainTextElement(text: string) {
   };
 }
 
-async function sendMessage(friendUin: string, text: string) {
+export async function sendMessage(friendUin: string, text: string) {
   const uid = await getUidByUin(friendUin);
   logger.info(`发送信息：uid=${uid}`);
   if (!uid) {
@@ -272,33 +265,3 @@ async function sendMessage(friendUin: string, text: string) {
   logger.info('sendMessage result =', res);
   return res;
 }
-
-const Exports = {
-  onDebugChanged(handler: (payload: { uin: string; debug: boolean }) => void) {
-    const ch = 'Echoes-Unheard.debugChanged';
-    const listener = (_e: any, payload: any) => handler(payload);
-    ipcRenderer.on(ch, listener);
-    return () => ipcRenderer.off(ch, listener);
-  },
-  invokeNative,
-  subscribeEvent,
-  getConfig(uin: string) {
-    return ipcRenderer.invoke('Echoes-Unheard.getConfig', uin);
-  },
-  setConfig(uin: string, cfg: any) {
-    return ipcRenderer.invoke('Echoes-Unheard.setConfig', uin, cfg);
-  },
-  onConfigChanged(handler: (payload: {uin: string; config: any}) => void) {
-    const ch = 'Echoes-Unheard.configChanged';
-    const listener = (_e: any, payload: any) => handler(payload);
-    ipcRenderer.on(ch, listener);
-    return () => ipcRenderer.off(ch, listener);
-  },
-  getUidByUin,
-  getUinByUid,
-  getCurrentUid,
-  getCurrentUin,
-  sendMessage
-};
-contextBridge.exposeInMainWorld('Echoes_Unheard', Exports);
-export type IPCExports = typeof Exports;

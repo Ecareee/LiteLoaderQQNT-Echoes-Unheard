@@ -1,5 +1,5 @@
 import {BrowserWindow, ipcMain} from 'electron';
-import {PluginConfig, readConfig, writeConfig} from '../util/config';
+import {PluginConfig, readConfig, writeConfig} from './config/config';
 
 let UID: string | null = null;
 
@@ -27,7 +27,7 @@ ipcMain.handle('Echoes-Unheard.setConfig', (_e, uin: string, cfg: PluginConfig) 
 /**
  * onLogin 函数是 LiteLoaderQQNT 框架提供的 hook，可用于获取当前 uid
  * 受 https://github.com/adproqwq/LiteLoaderQQNT-AutoSendMessages/blob/main/src/main/index.ts 启发
- * 为什么这个插件框架没有 onLogin 函数？罪大恶极
+ * 为什么这个插件模版没有 onLogin 函数？罪大恶极
  * 或者使用 authData 直接获取 uin？
  * 参考 https://github.com/WJZ-P/LiteLoaderQQNT-Grab-RedBag/blob/main/src/utils/grabRedBag.js
  */

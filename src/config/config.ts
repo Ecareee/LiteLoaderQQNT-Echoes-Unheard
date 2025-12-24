@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import {logger} from './logger';
+import {logger} from '../util/logger';
 
 export interface Rule {
   enabled: boolean;
@@ -62,7 +62,7 @@ function normalizeConfig(cfg: any): PluginConfig {
         awaitingReply: !!r?.awaitingReply,
         noReplyStreak: Math.max(0, Number(r?.noReplyStreak ?? 0) || 0),
         lastSentAt: Math.max(0, Number(r?.lastSentAt ?? 0) || 0),
-        lastReplyAt: Math.max(0, Number(r?.lastReplyAt ?? 0) || 0),
+        lastReplyAt: Math.max(0, Number(r?.lastReplyAt ?? 0) || 0)
       }))
       : []
   };
