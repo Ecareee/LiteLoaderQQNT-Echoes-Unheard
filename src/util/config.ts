@@ -8,16 +8,24 @@ export interface Rule {
   triggerFriendUin: string;
   targetFriendUin: string;
   replyText: string;
+
+  // 三振出局模式判断参数，将其持久化从而解决 QQ 莫名奇妙消失且再次登录需要扫码验证的问题（疑似被检测）
+  awaitingReply?: boolean;    // 是否在等对方回复
+  noReplyStreak?: number;     // 连续未回复次数
+  lastSentAt?: number;        // 上次发送时间
+  lastReplyAt?: number;       // 上次收到对方消息时间
 }
 
 export interface PluginConfig {
   enabled: boolean;
+  strikeOutMode?: boolean;
   debug: boolean;
   rules: Rule[];
 }
 
-const DEFAULT_CONFIG: PluginConfig = {
+export const DEFAULT_CONFIG: PluginConfig = {
   enabled: true,
+  strikeOutMode: false,
   debug: false,
   rules: []
 };
@@ -27,7 +35,7 @@ function ensureDir(p: string) {
 }
 
 function getDataDir(): string {
-  return globalThis.LiteLoader.plugins.echoes_unheard.path.data;
+  return LiteLoader.plugins.echoes_unheard.path.data;
 }
 
 function safeParse<T>(text: string, fallback: T): T {
@@ -41,6 +49,7 @@ function safeParse<T>(text: string, fallback: T): T {
 function normalizeConfig(cfg: any): PluginConfig {
   return {
     enabled: cfg?.enabled !== false, // 默认 true
+    strikeOutMode: !!cfg?.strikeOutMode,
     debug: cfg?.debug,
     rules: Array.isArray(cfg?.rules)
       ? cfg.rules.map((r: any) => ({
@@ -48,7 +57,12 @@ function normalizeConfig(cfg: any): PluginConfig {
         groupCode: String(r?.groupCode ?? '').trim(),
         triggerFriendUin: String(r?.triggerFriendUin ?? '').trim(),
         targetFriendUin: String(r?.targetFriendUin ?? '').trim(),
-        replyText: String(r?.replyText ?? '')
+        replyText: String(r?.replyText ?? ''),
+
+        awaitingReply: !!r?.awaitingReply,
+        noReplyStreak: Math.max(0, Number(r?.noReplyStreak ?? 0) || 0),
+        lastSentAt: Math.max(0, Number(r?.lastSentAt ?? 0) || 0),
+        lastReplyAt: Math.max(0, Number(r?.lastReplyAt ?? 0) || 0),
       }))
       : []
   };
