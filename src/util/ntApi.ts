@@ -1,5 +1,5 @@
-import {logger} from './logger';
-import {ipcRenderer} from 'electron';
+import { logger } from './logger';
+import { ipcRenderer } from 'electron';
 
 let UIN: string | null = null;
 const webContentsId = Number(new URLSearchParams(location.search).get('webcontentsid'));
@@ -74,7 +74,7 @@ export function invokeNative(eventName: string, cmdName: string, registered: boo
     // 发送 IPC 消息
     try {
       logger.info('[invokeNative] commandPayload =', JSON.stringify(commandPayload, (_k, v) => {
-        if (v instanceof Map) return {__type: 'Map', entries: Array.from(v.entries())};
+        if (v instanceof Map) return { __type: 'Map', entries: Array.from(v.entries()) };
         return v;
       }, 2));
 
@@ -143,7 +143,7 @@ export async function getUidByUin(uin: string): Promise<string | null> {
       'ntApi',
       'nodeIKernelUixConvertService/getUid',
       false,
-      {uins: [key]} // 必须是对象
+      { uins: [key] } // 必须是对象
     );
 
     logger.info('getUidByUin nodeIKernelUixConvertService/getUid result =', res);
@@ -171,7 +171,7 @@ export async function getUidByUin(uin: string): Promise<string | null> {
       'ntApi',
       'nodeIKernelProfileService/getUidByUin',
       false,
-      {callFrom: 'FriendsServiceImpl', uin: [key]} // 必须是对象
+      { callFrom: 'FriendsServiceImpl', uin: [key] } // 必须是对象
     );
 
     logger.info('getUidByUin nodeIKernelProfileService/getUidByUin result =', res2);
@@ -199,7 +199,7 @@ export async function getUinByUid(uid: string): Promise<string | null> {
       'ntApi',
       'nodeIKernelUixConvertService/getUin',
       false,
-      {uids: [key]} // 必须是对象
+      { uids: [key] } // 必须是对象
     );
 
     logger.info('getUinByUid result =', res);
@@ -236,7 +236,7 @@ function makePlainTextElement(text: string) {
   return {
     elementId: '',
     elementType: 1,
-    textElement: {content: text}
+    textElement: { content: text }
   };
 }
 
@@ -250,7 +250,7 @@ export async function sendMessage(friendUin: string, text: string) {
 
   const payload = {
     msgId: '0',
-    peer: {chatType: 1, peerUid: uid, guildId: ''},
+    peer: { chatType: 1, peerUid: uid, guildId: '' },
     msgElements: [makePlainTextElement(text)],
     msgAttributeInfos: new Map()
   };

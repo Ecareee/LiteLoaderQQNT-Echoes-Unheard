@@ -1,6 +1,6 @@
-import {defineConfig} from 'electron-vite';
-import {defineConfig as defineViteConfig} from 'vite';
-import {resolve} from 'path';
+import { defineConfig } from 'electron-vite';
+import { defineConfig as defineViteConfig } from 'vite';
+import { resolve } from 'path';
 import viteChecker from 'vite-plugin-checker';
 import viteCp from 'vite-plugin-cp';
 import viteZipPack from 'unplugin-zip-pack/vite';
@@ -57,7 +57,7 @@ export default defineConfig({
     plugins: [
       PluginChecker,
       viteCp({
-        targets: [{src: './manifest.json', dest: 'dist'}]
+        targets: [{ src: './manifest.json', dest: 'dist' }]
       }),
       viteZipPack({
         in: OUTPUT_DIR,

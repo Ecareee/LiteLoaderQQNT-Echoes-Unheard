@@ -1,7 +1,7 @@
-import {logger} from './logger';
-import type {PluginConfig} from '../config/config';
-import {persistConfigDebounced} from '../config/runtime';
-import {toMs} from './time';
+import { logger } from './logger';
+import type { PluginConfig } from '../config/config';
+import { persistConfigDebounced } from '../config/runtime';
+import { toMs } from './time';
 
 const MAX_NO_REPLY = 3;
 
@@ -71,13 +71,13 @@ export async function syncRepliesFromHistory(CONFIG: PluginConfig) {
       const uid = await Echoes_Unheard.getUidByUin(targetUin);
       if (!uid) continue;
 
-      const peer = {chatType: 1, peerUid: uid};
+      const peer = { chatType: 1, peerUid: uid };
 
       const res = await Echoes_Unheard.invokeNative(
         'ntApi',
         'nodeIKernelMsgService/getAioFirstViewLatestMsgs',
         false,
-        {peer, cnt: 100} // 必须是对象，仅拉取最近 100 条
+        { peer, cnt: 100 } // 必须是对象，仅拉取最近 100 条
       );
       logger.info('getAioFirstViewLatestMsgs result =', res);
 

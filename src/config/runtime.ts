@@ -1,6 +1,6 @@
-import type {PluginConfig} from './config';
-import {DEFAULT_CONFIG} from './config';
-import {logger} from '../util/logger';
+import type { PluginConfig } from './config';
+import { DEFAULT_CONFIG } from './config';
+import { logger } from '../util/logger';
 
 // 运行态配置
 let CONFIG: PluginConfig = DEFAULT_CONFIG;

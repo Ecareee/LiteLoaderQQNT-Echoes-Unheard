@@ -1,5 +1,5 @@
-import {contextBridge, ipcRenderer} from 'electron';
-import {setLoggerDebug} from './util/logger';
+import { contextBridge, ipcRenderer } from 'electron';
+import { setLoggerDebug } from './util/logger';
 import {
   getCurrentUid,
   getCurrentUin,

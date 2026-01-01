@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import type {IPCExports} from '../preload';
+import type { IPCExports } from '../preload';
 
 type $LiteLoaderAPI = {
   openPath: (path: string) => Promise<void>,

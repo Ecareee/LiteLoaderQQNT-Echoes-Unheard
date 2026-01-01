@@ -1,7 +1,7 @@
-import {logger, setLoggerDebug} from './util/logger';
-import type {PluginConfig} from './config/config';
-import {getRuntimeConfig, setRuntimeConfig, setUin} from './config/runtime';
-import {checkStrike, handlePrivateReply, syncRepliesFromHistory} from './util/strike';
+import { logger, setLoggerDebug } from './util/logger';
+import type { PluginConfig } from './config/config';
+import { getRuntimeConfig, setRuntimeConfig, setUin } from './config/runtime';
+import { checkStrike, handlePrivateReply, syncRepliesFromHistory } from './util/strike';
 
 let uin: string | null = null;
 
@@ -21,7 +21,7 @@ async function init() {
   setUin(uin);
 
   if (!offDebugChanged) {
-    offDebugChanged = Echoes_Unheard.onDebugChanged(({uin: changedUin, debug}) => {
+    offDebugChanged = Echoes_Unheard.onDebugChanged(({ uin: changedUin, debug }) => {
       if (String(changedUin) !== String(uin)) return;
       setLoggerDebug(debug);
       logger.info('debug 同步:', debug);
@@ -35,7 +35,7 @@ async function init() {
   logger.info('加载配置：', getRuntimeConfig());
 
   if (!offCfgChanged) {
-    offCfgChanged = Echoes_Unheard.onConfigChanged(({uin: changedUin, config}) => {
+    offCfgChanged = Echoes_Unheard.onConfigChanged(({ uin: changedUin, config }) => {
       if (String(changedUin) !== String(uin)) return;
       applyConfig(config as PluginConfig);
     });
@@ -91,7 +91,7 @@ function matchRulesAndHandle(msg: any) {
     if (r.groupCode !== groupCode) continue;
     if (r.triggerFriendUin !== senderUin) continue;
 
-    logger.info('命中规则：', {groupCode, senderUin, rule: r});
+    logger.info('命中规则：', { groupCode, senderUin, rule: r });
 
     if (!checkStrike(r, CONFIG)) continue;
 
@@ -422,7 +422,7 @@ export const onSettingWindowCreated = async (view: HTMLElement) => {
     return !!ae && ae.tagName === 'INPUT' && rulesContainer.contains(ae);
   }
 
-  offUiCfgChanged = Echoes_Unheard.onConfigChanged(({uin: changedUin, config}) => {
+  offUiCfgChanged = Echoes_Unheard.onConfigChanged(({ uin: changedUin, config }) => {
     if (String(changedUin) !== String(uin)) return;
 
     uiConfig = config as PluginConfig;

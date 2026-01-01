@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import {logger} from '../util/logger';
+import { logger } from '../util/logger';
 
 export interface Rule {
   enabled: boolean;
@@ -31,7 +31,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
 };
 
 function ensureDir(p: string) {
-  fs.mkdirSync(p, {recursive: true});
+  fs.mkdirSync(p, { recursive: true });
 }
 
 function getDataDir(): string {

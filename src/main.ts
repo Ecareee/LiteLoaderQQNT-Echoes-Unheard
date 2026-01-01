@@ -1,5 +1,5 @@
-import {BrowserWindow, ipcMain} from 'electron';
-import {PluginConfig, readConfig, writeConfig} from './config/config';
+import { BrowserWindow, ipcMain } from 'electron';
+import { PluginConfig, readConfig, writeConfig } from './config/config';
 
 let UID: string | null = null;
 
@@ -7,7 +7,7 @@ ipcMain.handle('Echoes-Unheard.getConfig', (e, uin: string) => {
   const cfg = readConfig(String(uin));
 
   // 调试开关在 main 统一管理，renderer/preload 自动同步
-  e.sender.send('Echoes-Unheard.debugChanged', {uin: String(uin), debug: cfg.debug});
+  e.sender.send('Echoes-Unheard.debugChanged', { uin: String(uin), debug: cfg.debug });
 
   return cfg;
 });
@@ -17,8 +17,8 @@ ipcMain.handle('Echoes-Unheard.setConfig', (_e, uin: string, cfg: PluginConfig) 
 
   // 广播给所有窗口
   for (const w of BrowserWindow.getAllWindows()) {
-    w.webContents.send('Echoes-Unheard.configChanged', {uin: uin, config: saved});
-    w.webContents.send('Echoes-Unheard.debugChanged', {uin: String(uin), debug: saved.debug});
+    w.webContents.send('Echoes-Unheard.configChanged', { uin: uin, config: saved });
+    w.webContents.send('Echoes-Unheard.debugChanged', { uin: String(uin), debug: saved.debug });
   }
 
   return saved;
